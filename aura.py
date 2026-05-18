@@ -7,7 +7,8 @@ import streamlit as st
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+# SE CORRIGIÓ: VideoProcessorBase -> VideoTransformerBase
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
 import av
 
 st.set_page_config(page_title="Aura", layout="centered", initial_sidebar_state="collapsed")
@@ -95,11 +96,14 @@ CHAKRA_BGR = [
     (220, 0,   180),
 ]
 
-class AuraProcessor(VideoProcessorBase):
+# SE CORRIGIÓ: Heredar de VideoTransformerBase en vez de VideoProcessorBase
+class AuraProcessor(VideoTransformerBase):
     def __init__(self):
         self.model = load_model()
 
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+    # SE ADAPTÓ: Las versiones modernas usan transform() o recv() indistintamente,
+    # pero transform maneja mejor los objetos de tipo VideoFrame directamente
+    def transform(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
         h, w, _ = img.shape
@@ -124,12 +128,13 @@ st.markdown('<div id="video-wrap"><button id="fs-btn">⛶</button>', unsafe_allo
 
 webrtc_streamer(
     key="aura",
-    video_processor_factory=AuraProcessor,
+    # SE CORRIGIÓ: Pasarle directamente la clase procesadora corregida
+    video_transformer_factory=AuraProcessor,
     rtc_configuration=RTCConfiguration(
         {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
     ),
     media_stream_constraints={"video": {"width": 854, "height": 480}, "audio": False},
-    async_processing=False,
+    async_processing=True,
 )
 
 st.markdown('</div>', unsafe_allow_html=True)
