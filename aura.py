@@ -1,13 +1,8 @@
-import subprocess, sys
-# Forzar opencv-python-headless y sacar opencv-python que necesita libGL
-subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python"], capture_output=True)
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "opencv-python-headless"], capture_output=True)
-
 import streamlit as st
 import cv2
 import numpy as np
 from ultralytics import YOLO
-# SE CORRIGIÓ: VideoProcessorBase -> VideoTransformerBase
+# Se usa VideoTransformerBase que es el estándar actual
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
 import av
 
@@ -96,13 +91,10 @@ CHAKRA_BGR = [
     (220, 0,   180),
 ]
 
-# SE CORRIGIÓ: Heredar de VideoTransformerBase en vez de VideoProcessorBase
 class AuraProcessor(VideoTransformerBase):
     def __init__(self):
         self.model = load_model()
 
-    # SE ADAPTÓ: Las versiones modernas usan transform() o recv() indistintamente,
-    # pero transform maneja mejor los objetos de tipo VideoFrame directamente
     def transform(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
@@ -128,7 +120,6 @@ st.markdown('<div id="video-wrap"><button id="fs-btn">⛶</button>', unsafe_allo
 
 webrtc_streamer(
     key="aura",
-    # SE CORRIGIÓ: Pasarle directamente la clase procesadora corregida
     video_transformer_factory=AuraProcessor,
     rtc_configuration=RTCConfiguration(
         {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
