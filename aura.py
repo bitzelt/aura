@@ -2,168 +2,189 @@ import streamlit as st
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import av
 
-# ── Configuración de página ──────────────────────────────────────────────────
-st.set_page_config(page_title="Aura", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Aura", layout="wide", initial_sidebar_state="collapsed")
 
-# ── CSS global ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Yatra+One&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&display=swap');
 
-    .stApp { background-color: #FFFFFF !important; }
+    .stApp { background-color: #0d0d0d !important; }
     #MainMenu, footer, header { visibility: hidden; }
+    [data-testid="collapsedControl"] { display: none; }
+    section[data-testid="stSidebar"] { display: none; }
 
-    [data-testid="stSidebar"] {
-        background-color: #111111 !important;
+    .aura-logo {
+        font-family: 'Cinzel Decorative', cursive;
+        font-size: 28px;
+        color: #e8d5ff;
+        letter-spacing: 6px;
+        padding: 18px 0 0 28px;
+        text-shadow: 0 0 20px rgba(180,100,255,0.6);
     }
 
-    .titulo-india {
-        font-family: 'Yatra One', cursive;
-        font-size: 50px;
-        color: #ffffff;
+    .video-frame {
+        display: block;
+        margin: 10px auto 0 auto;
+        width: 70vw;
+        max-width: 900px;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 0 60px rgba(150, 80, 255, 0.25), 0 4px 30px rgba(0,0,0,0.8);
+        background: #111;
+    }
+
+    .video-frame > div,
+    .video-frame video,
+    .video-frame canvas {
+        width: 100% !important;
+        border-radius: 10px;
+    }
+
+    .video-frame button {
+        background: #7c3aed !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 10px 24px !important;
+        font-size: 15px !important;
+        cursor: pointer !important;
+        margin: 16px auto !important;
+        display: block !important;
+    }
+
+    .fullscreen-hint {
         text-align: center;
-        margin-top: 20px;
+        color: #444;
+        font-size: 12px;
         letter-spacing: 2px;
+        margin-top: 14px;
+        font-family: monospace;
     }
 
-    .sidebar-label {
-        font-family: 'Yatra One', cursive;
-        color: #cccccc;
-        font-size: 14px;
-        margin-top: 16px;
+    .chakra-info {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 12px;
+        flex-wrap: wrap;
     }
-
-    /* Ocultar labels nativos de sliders */
-    [data-testid="stSidebar"] .stSlider label { display: none; }
-
-    .video-wrapper {
-        background-color: #1a1a1a;
-        border-radius: 12px;
-        padding: 12px;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.25);
-        max-width: 860px;
-        margin: 20px auto;
-    }
-
-    /* Pantalla completa con F11 */
-    body.fs-mode [data-testid="stSidebar"] { display: none !important; }
-    body.fs-mode .video-wrapper {
-        position: fixed;
-        inset: 0;
-        max-width: 100vw;
-        width: 100vw;
-        height: 100vh;
-        margin: 0;
-        border-radius: 0;
-        padding: 0;
-        z-index: 99999;
-        background: #000;
+    .chakra-pill {
+        font-size: 11px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        letter-spacing: 1px;
+        font-family: monospace;
+        opacity: 0.7;
     }
 </style>
 
 <script>
 (function() {
     const doc = window.parent.document;
-    function applyFS() {
-        doc.body.classList.toggle('fs-mode', !!doc.fullscreenElement);
-    }
-    doc.addEventListener('fullscreenchange', applyFS);
     doc.addEventListener('keydown', (e) => {
-        if (e.key === 'F11') setTimeout(applyFS, 150);
+        if (e.key === 'F11') {
+            e.preventDefault();
+            if (!doc.fullscreenElement) {
+                doc.documentElement.requestFullscreen();
+            } else {
+                doc.exitFullscreen();
+            }
+        }
     });
 })();
 </script>
 """, unsafe_allow_html=True)
 
-# ── Cargar modelo (cacheado) ─────────────────────────────────────────────────
+st.markdown('<div class="aura-logo">✦ AURA</div>', unsafe_allow_html=True)
+
 @st.cache_resource
 def load_model():
     return YOLO("yolo26n-seg.pt")
 
-# ── Colores Chakras (BGR) ─────────────────────────────────────────────────────
-CHAKRA_BGR = {
-    0: (0,   0,   255),
-    1: (0,   127, 255),
-    2: (0,   255, 255),
-    3: (0,   255, 0  ),
-    4: (255, 191, 0  ),
-    5: (130, 0,   75 ),
-    6: (211, 0,   148),
-}
+CHAKRAS = [
+    {"name": "Muladhara",     "bgr": (0,   0,   220), "hex": "#dc0000"},
+    {"name": "Svadhisthana",  "bgr": (0,   110, 255), "hex": "#ff6e00"},
+    {"name": "Manipura",      "bgr": (0,   220, 255), "hex": "#ffdc00"},
+    {"name": "Anahata",       "bgr": (0,   200, 0  ), "hex": "#00c800"},
+    {"name": "Vishuddha",     "bgr": (255, 160, 0  ), "hex": "#00a0ff"},
+    {"name": "Ajna",          "bgr": (180, 0,   80 ), "hex": "#5000b4"},
+    {"name": "Sahasrara",     "bgr": (220, 0,   180), "hex": "#b400dc"},
+]
 
-# ── Procesador de video para webrtc ──────────────────────────────────────────
 class AuraProcessor(VideoProcessorBase):
     def __init__(self):
         self.model = load_model()
-        self.intensity = 0.55
-        self.expand    = 2
-        self.blur      = 65
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
         img = cv2.flip(img, 1)
         h, w, _ = img.shape
 
-        results = self.model.track(img, classes=[0], persist=True, verbose=False)
-        aura_mask = np.zeros_like(img)
+        try:
+            results = self.model.track(img, classes=[0], persist=True, verbose=False)
+            aura_mask = np.zeros_like(img)
 
-        if results[0].masks is not None and results[0].boxes.id is not None:
-            masks     = results[0].masks.data
-            track_ids = results[0].boxes.id.int().cpu().tolist()
+            if results[0].masks is not None and results[0].boxes.id is not None:
+                masks     = results[0].masks.data
+                track_ids = results[0].boxes.id.int().cpu().tolist()
 
-            for mask, track_id in zip(masks, track_ids):
-                mask_np = cv2.resize(
-                    mask.cpu().numpy(), (w, h)
-                ).astype(np.uint8)
-                color_bgr = CHAKRA_BGR[track_id % 7]
-                colored = np.zeros_like(img)
-                colored[mask_np == 1] = color_bgr
-                aura_mask = cv2.add(aura_mask, colored)
+                for mask, track_id in zip(masks, track_ids):
+                    mask_np = cv2.resize(
+                        mask.cpu().numpy(), (w, h)
+                    ).astype(np.uint8)
 
-            kernel = np.ones((21, 21), np.uint8)
-            aura_mask = cv2.dilate(aura_mask, kernel, iterations=self.expand)
-            blur_k = self.blur if self.blur % 2 == 1 else self.blur + 1
-            aura_mask = cv2.GaussianBlur(aura_mask, (blur_k, blur_k), 0)
+                    chakra  = CHAKRAS[track_id % 7]
+                    colored = np.zeros_like(img)
+                    colored[mask_np == 1] = chakra["bgr"]
+                    aura_mask = cv2.add(aura_mask, colored)
 
-        out = cv2.addWeighted(img, 1.0, aura_mask, self.intensity, 0)
-        return av.VideoFrame.from_ndarray(out, format="bgr24")
+                    # Nombre del chakra sobre la persona
+                    ys, xs = np.where(mask_np == 1)
+                    if len(xs) > 0:
+                        cx, cy = int(xs.mean()), int(ys.min()) - 12
+                        cy = max(cy, 20)
+                        label = chakra["name"]
+                        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+                        cv2.rectangle(img,
+                                      (cx - tw//2 - 6, cy - th - 6),
+                                      (cx + tw//2 + 6, cy + 4),
+                                      (0, 0, 0), -1)
+                        cv2.putText(img, label, (cx - tw//2, cy),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                                    chakra["bgr"], 1, cv2.LINE_AA)
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown('<p class="titulo-india">Aura</p>', unsafe_allow_html=True)
+                kernel    = np.ones((21, 21), np.uint8)
+                aura_mask = cv2.dilate(aura_mask, kernel, iterations=2)
+                aura_mask = cv2.GaussianBlur(aura_mask, (65, 65), 0)
 
-    st.markdown('<p class="sidebar-label">Intensidad del aura</p>', unsafe_allow_html=True)
-    aura_intensity = st.slider("Intensidad", 0.1, 1.0, 0.55, 0.05, label_visibility="hidden")
+            img = cv2.addWeighted(img, 1.0, aura_mask, 0.55, 0)
 
-    st.markdown('<p class="sidebar-label">Expansión del aura</p>', unsafe_allow_html=True)
-    aura_expand = st.slider("Expansión", 1, 5, 2, 1, label_visibility="hidden")
+        except Exception:
+            pass
 
-    st.markdown('<p class="sidebar-label">Suavizado</p>', unsafe_allow_html=True)
-    aura_blur = st.slider("Suavizado", 11, 99, 65, 2, label_visibility="hidden")
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-    st.markdown("---")
-    st.markdown(
-        '<p style="color:#555;font-size:11px;margin-top:8px;">F11 → pantalla completa</p>',
-        unsafe_allow_html=True
-    )
+st.markdown('<div class="video-frame">', unsafe_allow_html=True)
 
-# ── Área de video ─────────────────────────────────────────────────────────────
-st.markdown('<div class="video-wrapper">', unsafe_allow_html=True)
-
-ctx = webrtc_streamer(
+webrtc_streamer(
     key="aura",
     video_processor_factory=AuraProcessor,
-    media_stream_constraints={"video": True, "audio": False},
+    rtc_configuration=RTCConfiguration(
+        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+    ),
+    media_stream_constraints={"video": {"width": 1280, "height": 720}, "audio": False},
     async_processing=True,
 )
 
-# Actualizar parámetros del procesador en tiempo real
-if ctx.video_processor:
-    ctx.video_processor.intensity = aura_intensity
-    ctx.video_processor.expand    = aura_expand
-    ctx.video_processor.blur      = aura_blur
-
 st.markdown('</div>', unsafe_allow_html=True)
+
+pills = "".join([
+    f'<span class="chakra-pill" style="background:{c["hex"]}22; color:{c["hex"]}; border:1px solid {c["hex"]}55">{c["name"]}</span>'
+    for c in CHAKRAS
+])
+st.markdown(f'<div class="chakra-info">{pills}</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="fullscreen-hint">F11 · PANTALLA COMPLETA</div>', unsafe_allow_html=True)
