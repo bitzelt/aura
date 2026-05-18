@@ -10,17 +10,14 @@ st.set_page_config(page_title="Aura", layout="centered", initial_sidebar_state="
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Yatra+One&display=swap');
-
     .stApp { background-color: #ffffff !important; }
     #MainMenu, footer, header { visibility: hidden; }
     [data-testid="collapsedControl"] { display: none; }
     section[data-testid="stSidebar"] { display: none; }
-
     .aura-logo {
         font-family: 'Yatra One', cursive;
         font-size: 32px;
         color: #222;
-        text-align: left;
         padding: 16px 0 8px 0;
         letter-spacing: 3px;
     }
@@ -43,9 +40,13 @@ CHAKRA_BGR = [
     (220, 0,   180),
 ]
 
+# Contador global para simular track_id sin usar .track()
+_person_counter = [0]
+
 class AuraProcessor(VideoProcessorBase):
     def __init__(self):
         self.model = load_model()
+        self._color_idx = 0
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
@@ -53,17 +54,17 @@ class AuraProcessor(VideoProcessorBase):
         h, w, _ = img.shape
 
         try:
-            results = self.model.track(img, classes=[0], persist=True, verbose=False)
+            # Usar predict en lugar de track (no requiere lap)
+            results = self.model.predict(img, classes=[0], verbose=False)
             aura_mask = np.zeros_like(img)
 
-            if results[0].masks is not None and results[0].boxes.id is not None:
-                masks     = results[0].masks.data
-                track_ids = results[0].boxes.id.int().cpu().tolist()
+            if results[0].masks is not None:
+                masks = results[0].masks.data
 
-                for mask, track_id in zip(masks, track_ids):
+                for i, mask in enumerate(masks):
                     mask_np = cv2.resize(mask.cpu().numpy(), (w, h)).astype(np.uint8)
                     colored = np.zeros_like(img)
-                    colored[mask_np == 1] = CHAKRA_BGR[track_id % 7]
+                    colored[mask_np == 1] = CHAKRA_BGR[i % 7]
                     aura_mask = cv2.add(aura_mask, colored)
 
                 kernel    = np.ones((21, 21), np.uint8)
